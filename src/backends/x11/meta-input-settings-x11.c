@@ -126,9 +126,6 @@ get_property (ClutterInputDevice *device,
 
   if (rc == Success && type_ret == type && format_ret == format && nitems_ret >= nitems)
     {
-      if (nitems_ret > nitems)
-        g_warning ("Property '%s' for device '%s' returned %lu items, expected %lu",
-                   property, clutter_input_device_get_device_name (device), nitems_ret, nitems);
       return data_ret;
     }
 
@@ -901,6 +898,8 @@ action_to_button (CDesktopStylusButtonAction action,
       return 8;
     case C_DESKTOP_STYLUS_BUTTON_ACTION_FORWARD:
       return 9;
+    case C_DESKTOP_STYLUS_BUTTON_ACTION_DISABLED:
+      return 0;
     case C_DESKTOP_STYLUS_BUTTON_ACTION_DEFAULT:
     default:
       return button;

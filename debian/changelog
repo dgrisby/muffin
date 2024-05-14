@@ -1,3 +1,93 @@
+muffin (6.0.1) virginia; urgency=medium
+
+  [ Michael Webster ]
+  * meta-compositor-x11.c: Don't disable fractional scaling when unredirecting a fullscreen window.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Thu, 28 Dec 2023 11:53:02 +0000
+
+muffin (6.0.0) virginia; urgency=medium
+
+  [ Michael Webster ]
+  * Remove deprecated/removed zenity arguments.
+  * Update issue templates.
+  * bug report: Mention crashes.
+  * Update issue template with a link to open and closed issues.
+  * meta-monitor.c: Allow 75% scaling once more.
+  * Make meta_set_verbose() public.
+
+  [ Rick Calixte ]
+  * Fix a meson warning (#674)
+  * Fix meson.build deprecations up to 0.56.0 (#675)
+
+  [ Michael Webster ]
+  * keybindings: Restore window opacity keybindings.
+  * input settings: Allow disabling stylus buttons.
+
+  [ Clement Lefebvre ]
+  * Fix some incorrect gsettings schemas
+
+  [ Michael Webster ]
+  * build/packaging: Restore Wayland support
+  * wayland: Fix desktop background
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sun, 19 Nov 2023 13:47:31 +0000
+
+muffin (5.8.1) victoria; urgency=medium
+
+  [ Michael Webster ]
+  * Escape vendor info for the monitor/layout configuration, don't call meta_monitor_spec_free() on a NULL pointer.
+  * Fix build...
+  * Disable fractional scaling by default.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Fri, 07 Jul 2023 15:25:00 +0200
+
+muffin (5.8.0) victoria; urgency=medium
+
+  [ Michael Webster ]
+  * meta-gpu-xrandr: Account for the current user text scale factor when calculating the crtc scale based on Xft.dpi.
+  * window.c: Allow meta_window_get_xwindow() to be used with introspection.
+  * Restore some global signals.
+  * window.c: Restore property notify for the tile mode property.
+  * place.c: Add missing import.
+  * display.c: Make meta_display_get_pointer_window() available to cinnamon again.
+  * clutter-text.c: Remove redundant clutter_text_set_buffer call in finalize.
+  * window.c: Fix copy/paste error in tile zone detection.
+  * github workflow: Add optional ssh session.
+  * tiling: Expose tile 'push' actions that are currently used by keybindings.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Thu, 01 Jun 2023 16:15:07 +0100
+
+muffin (5.6.3) vera; urgency=medium
+
+  [ Bobby Rong ]
+  * compositor: Fix possible crash when restarting Cinnamon (#655)
+
+  [ Michael Webster ]
+  * tiling: Skip the resize effect for tiled windows during user grabs.
+  * tiling: Remove unnecessary update_edge_constraints().
+  * Add tilix and qterminal to the new-window focus list.
+  * window activation: Detect a couple of conditions that might cause initial window focus and stacking to be wrong (mostly because of bad timestamps), and correct them.
+  * window.c: Improve the test for checking if an 'above' window may cover a new window.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Sat, 07 Jan 2023 15:54:38 +0000
+
+muffin (5.6.2) vera; urgency=medium
+
+  [ Michael Webster ]
+  * Disable automaximize by default.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Tue, 13 Dec 2022 15:15:15 +0000
+
+muffin (5.6.1) vera; urgency=medium
+
+  [ Duncan Grisby ]
+  * Bring back window placement-mode  (#649)
+
+  [ Michael Webster ]
+  * Update debian symbols file.
+
+ -- Clement Lefebvre <root@linuxmint.com>  Tue, 29 Nov 2022 16:32:53 +0000
+
 muffin (5.6.0) vera; urgency=medium
 
   [ Michael Webster ]

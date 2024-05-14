@@ -119,6 +119,8 @@ META_EXPORT
 void meta_topic_real      (MetaDebugTopic topic,
                            const char    *format,
                            ...) G_GNUC_PRINTF (2, 3);
+META_EXPORT
+void     meta_set_verbose (gboolean setting);
 
 META_EXPORT
 void meta_add_verbose_topic    (MetaDebugTopic topic);
@@ -157,7 +159,6 @@ GPid meta_show_dialog (const char *type,
                        const char *display,
                        const char *ok_text,
                        const char *cancel_text,
-                       const char *icon_name,
                        const int transient_for,
                        GSList *columns,
                        GSList *entries);

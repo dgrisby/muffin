@@ -171,6 +171,8 @@ static MetaWindow *meta_window_find_tile_match (MetaWindow   *window,
                                                 gboolean      vertical);
 static void update_edge_constraints (MetaWindow *window);
 
+static void notify_tile_mode (MetaWindow *window);
+
 /* Idle handlers for the three queues (run with meta_later_add()). The
  * "data" parameter in each case will be a GINT_TO_POINTER of the
  * index into the queue arrays to use.
@@ -1005,8 +1007,13 @@ meta_window_main_monitor_changed (MetaWindow               *window,
     g_signal_emit_by_name (window->display, "window-left-monitor",
                            old->number, window);
   if (window->monitor)
-    g_signal_emit_by_name (window->display, "window-entered-monitor",
-                           window->monitor->number, window);
+    {
+      g_signal_emit_by_name (window->display, "window-entered-monitor",
+                             window->monitor->number, window);
+
+      g_signal_emit_by_name (window->display, "window-monitor-changed",
+                             window, window->monitor->number);
+    }
 }
 
 MetaLogicalMonitor *
@@ -2284,7 +2291,10 @@ window_is_terminal (MetaWindow *window)
   /* Terminal -- XFCE Terminal */
   else if (strcmp (window->res_class, "Terminal") == 0)
     return TRUE;
-
+  else if (strcmp (window->res_class, "Tilix") == 0)
+    return TRUE;
+  else if (strcmp (window->res_class, "qterminal") == 0)
+    return TRUE;
   return FALSE;
 }
 
@@ -2387,12 +2397,16 @@ windows_overlap (const MetaWindow *w1, const MetaWindow *w2)
  * (say) ninety per cent and almost indistinguishable from total.
  */
 static gboolean
-window_would_be_covered (const MetaWindow *newbie)
+window_may_be_covered_by_above (const MetaWindow *newbie)
 {
+  MetaBackend *backend = meta_get_backend ();
+  MetaLogicalMonitor *monitor;
   MetaWorkspace *workspace = meta_window_get_workspace ((MetaWindow *)newbie);
   GList *tmp, *windows;
 
+  monitor = meta_backend_get_current_logical_monitor (backend);
   windows = meta_workspace_list_windows (workspace);
+  gboolean overlaps = FALSE;
 
   tmp = windows;
   while (tmp != NULL)
@@ -2401,11 +2415,41 @@ window_would_be_covered (const MetaWindow *newbie)
 
       if (w->wm_state_above && w != newbie)
         {
-          /* We have found a window that is "above". Perhaps it overlaps. */
-          if (windows_overlap (w, newbie))
+          /* We have found a window that is "above". Do some tests. This is run before
+           * newbie is actually placed, so its position and monitor are not yet accurate,
+           * but it's not feasible to do it after either (because then it's too late). These
+           * tests can eliminate a lot of silly false positives, however. */
+
+          // Minimized - no overlap
+          if (w->minimized)
             {
-              g_list_free (windows); /* clean up... */
-              return TRUE; /* yes, it does */
+              tmp = tmp->next;
+              continue;
+            }
+
+          // Maximized, same monitor, overlap.
+          if (w->monitor->number == monitor->number && meta_window_get_maximized (w))
+            {
+              overlaps = TRUE;
+              break;
+            }
+
+          MetaRectangle w_rect, w_in_area_rect, work_area;
+          meta_window_get_frame_rect (w, &w_rect);
+          meta_workspace_get_work_area_for_monitor (workspace, monitor->number, &work_area);
+
+          // If the above window is at least partially on the target monitor, check if the new window
+          // would theoretically have enough room leftover to be completely uncovered. This is no
+          // guarantee it *will* be uncovered, but it's the best we can do without an accurate position
+          // for the new window.
+          if (meta_rectangle_intersect (&work_area, &w_rect, &w_in_area_rect))
+            {
+              if ((newbie->rect.width + w_in_area_rect.width > work_area.width) &&
+                  (newbie->rect.height + w_in_area_rect.height > work_area.height))
+                {
+                  overlaps = TRUE;
+                  break;
+                }
             }
         }
 
@@ -2413,7 +2457,7 @@ window_would_be_covered (const MetaWindow *newbie)
     }
 
   g_list_free (windows);
-  return FALSE; /* none found */
+  return overlaps;
 }
 
 void
@@ -2496,7 +2540,7 @@ meta_window_show (MetaWindow *window)
 
   if ( focus_window != NULL && window->showing_for_first_time &&
       ( (!place_on_top_on_map && !takes_focus_on_map) ||
-      window_would_be_covered (window) )
+      window_may_be_covered_by_above (window) )
     ) {
       if (!meta_window_is_ancestor_of_transient (focus_window, window))
         {
@@ -2985,6 +3029,7 @@ meta_window_maximize (MetaWindow        *window,
           window->maximized_vertically = FALSE;
           window->tile_mode = META_TILE_NONE;
           from_tiled = TRUE;
+          notify_tile_mode (window);
         }
 
       meta_window_maximize_internal (window,
@@ -3287,8 +3332,7 @@ meta_window_get_tile_fractions (MetaWindow   *window,
 static void
 meta_window_update_tile_fractions (MetaWindow *window,
                                    int         new_w,
-                                   int         new_h,
-                                   gboolean    in_update_resize)
+                                   int         new_h)
 {
   MetaWindow *vtile_match = window->vtile_match;
   MetaWindow *htile_match = window->htile_match;
@@ -3304,10 +3348,10 @@ meta_window_update_tile_fractions (MetaWindow *window,
   window->tile_vfraction = (double)new_h / work_area.height;
 
   if (htile_match && window->display->grab_window == window)
-    meta_window_tile (htile_match, htile_match->tile_mode, in_update_resize);
+    meta_window_tile (htile_match, htile_match->tile_mode);
 
   if (vtile_match && window->display->grab_window == window)
-    meta_window_tile (vtile_match, vtile_match->tile_mode, in_update_resize);
+    meta_window_tile (vtile_match, vtile_match->tile_mode);
 }
 
 static void
@@ -3455,12 +3499,21 @@ update_edge_constraints (MetaWindow *window)
     }
 }
 
+static void
+notify_tile_mode (MetaWindow *window)
+{
+  g_object_freeze_notify (G_OBJECT (window));
+  g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_TILE_MODE]);
+  g_object_thaw_notify (G_OBJECT (window));
+}
+
 void
 meta_window_tile (MetaWindow   *window,
-                  MetaTileMode  tile_mode,
-                  gboolean      in_update_resize)
+                  MetaTileMode  tile_mode)
 {
   MetaMaximizeFlags directions;
+  gboolean changed = FALSE;
+
   /* Maximization constraints beat tiling constraints, so if the window
    * is maximized, tiling won't have any effect unless we unmaximize it
    * horizontally first; rather than calling meta_window_unmaximize(),
@@ -3471,6 +3524,8 @@ meta_window_tile (MetaWindow   *window,
 
   window->maximized_horizontally = FALSE;
   window->maximized_vertically = FALSE;
+
+  changed = tile_mode != window->tile_mode;
   window->tile_mode = tile_mode;
 
   /* Don't do anything if no tiling is requested */
@@ -3503,15 +3558,14 @@ meta_window_tile (MetaWindow   *window,
   meta_window_maximize_internal (window, directions, maybe_saved_rect);
   meta_display_update_tile_preview (window->display, FALSE);
 
-  /* Setup the edge constraints */
-  update_edge_constraints (window);
-
-  if (!in_update_resize)
+  if ((!window->htile_match || window->htile_match != window->display->grab_window) &&
+      (!window->vtile_match || window->vtile_match != window->display->grab_window))
     {
       MetaRectangle old_frame_rect, old_buffer_rect;
 
       meta_window_get_frame_rect (window, &old_frame_rect);
       meta_window_get_buffer_rect (window, &old_buffer_rect);
+
       meta_compositor_size_change_window (window->display->compositor, window,
                                           META_SIZE_CHANGE_TILE,
                                           &old_frame_rect, &old_buffer_rect);
@@ -3526,6 +3580,9 @@ meta_window_tile (MetaWindow   *window,
 
   if (window->frame)
     meta_frame_queue_draw (window->frame);
+
+  if (changed)
+    notify_tile_mode (window);
 }
 
 MetaTileMode
@@ -3540,8 +3597,8 @@ meta_window_restore_tile (MetaWindow   *window,
                           int           width,
                           int           height)
 {
-  meta_window_update_tile_fractions (window, width, height, FALSE);
-  meta_window_tile (window, mode, FALSE);
+  meta_window_update_tile_fractions (window, width, height);
+  meta_window_tile (window, mode);
 }
 
 static gboolean
@@ -3657,7 +3714,10 @@ meta_window_unmaximize (MetaWindow        *window,
       meta_window_get_buffer_rect (window, &old_buffer_rect);
 
       if (unmaximize_vertically)
-        window->tile_mode = META_TILE_NONE;
+        {
+          window->tile_mode = META_TILE_NONE;
+          notify_tile_mode (window);
+        }
 
       meta_topic (META_DEBUG_WINDOW_OPS,
                   "Unmaximizing %s%s\n",
@@ -4042,12 +4102,31 @@ meta_window_activate_full (MetaWindow     *window,
   if (timestamp != 0 &&
       XSERVER_TIME_IS_BEFORE (timestamp, window->display->last_user_time))
     {
-      meta_topic (META_DEBUG_FOCUS,
-                  "last_user_time (%u) is more recent; ignoring "
-                  " _NET_ACTIVE_WINDOW message.\n",
-                  window->display->last_user_time);
-      meta_window_set_demands_attention(window);
-      return;
+      // If the window is modal its parent is currently the focused window, always give
+      // focus, even if its timestamp is wrong. Check also for an xdg-portal dialog, which
+      // probably won't have the correct timestamp either.
+      //
+      // Otherwise, these windows will either start below their parent window, or they may
+      // start above the parent, but with the parent retaining focus.
+      if (window->type == META_WINDOW_MODAL_DIALOG &&
+              ((window->transient_for && window->display->focus_window == window->transient_for) ||
+              g_strcmp0 (window->res_class, "Xdg-desktop-portal-gtk") == 0))
+        {
+          meta_topic (META_DEBUG_FOCUS,
+                      "Window is a modal dialog and and its parent is currently focused, or it's an xdg-desktop-portal-gtk dialog), "
+                      "adjusting its timestamp so it will be focused and brought forward.\n");
+
+          timestamp = meta_display_get_current_time_roundtrip (window->display);
+        }
+      else
+        {
+          meta_topic (META_DEBUG_FOCUS,
+                      "last_user_time (%u) is more recent; ignoring "
+                      " _NET_ACTIVE_WINDOW message.\n",
+                      window->display->last_user_time);
+          meta_window_set_demands_attention(window);
+          return;
+        }
     }
 
   if (timestamp == 0)
@@ -4727,7 +4806,7 @@ meta_window_resize_frame_with_gravity (MetaWindow *window,
        */
       if (window->display->grab_window == window)
         adjust_size_for_tile_match (window, &w, &h);
-      meta_window_update_tile_fractions (window, w, h, TRUE);
+      meta_window_update_tile_fractions (window, w, h);
     }
 
   flags = (user_op ? META_MOVE_RESIZE_USER_ACTION : 0) | META_MOVE_RESIZE_RESIZE_ACTION;
@@ -5266,6 +5345,7 @@ set_workspace_state (MetaWindow    *window,
   meta_window_current_workspace_changed (window);
   g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_ON_ALL_WORKSPACES]);
   g_signal_emit (window, window_signals[WORKSPACE_CHANGED], 0);
+  g_signal_emit_by_name (window->display, "window-workspace-changed", window, window->workspace);
 }
 
 static gboolean
@@ -6184,7 +6264,10 @@ meta_window_recalc_features (MetaWindow *window)
               window->skip_pager);
 
   if (old_skip_taskbar != window->skip_taskbar)
-    g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_SKIP_TASKBAR]);
+    {
+      g_object_notify_by_pspec (G_OBJECT (window), obj_props[PROP_SKIP_TASKBAR]);
+      g_signal_emit_by_name (window->display, "window-skip-taskbar-changed", window);
+    }
 
   /* FIXME:
    * Lame workaround for recalc_features being used overzealously.
@@ -6453,7 +6536,7 @@ get_tile_zone_at_pointer (MetaWindow         *window,
     zones |= ZONE_RIGHT;
   if (y >= BOX_TOP (lm_rect) && y <= (BOX_TOP (work_area) + ORIGIN_CONSTANT + up_shift))
     zones |= ZONE_TOP;
-  if ((y >= BOX_BOTTOM (work_area) - EXTREME_CONSTANT - down_shift) && y < BOX_RIGHT (lm_rect))
+  if ((y >= BOX_BOTTOM (work_area) - EXTREME_CONSTANT - down_shift) && y < BOX_BOTTOM (lm_rect))
     zones |= ZONE_BOTTOM;
 
   return zones;
@@ -6615,7 +6698,12 @@ update_move (MetaWindow  *window,
        * is enabled, as top edge tiling can be used in that case
        */
       window->shaken_loose = !meta_prefs_get_edge_tiling ();
-      window->tile_mode = META_TILE_NONE;
+
+      if (window->tile_mode != META_TILE_NONE)
+        {
+          window->tile_mode = META_TILE_NONE;
+          notify_tile_mode (window);
+        }
 
       /* move the unmaximized window to the cursor */
       prop =
@@ -6655,7 +6743,12 @@ update_move (MetaWindow  *window,
       MetaRectangle work_area;
       int monitor;
 
-      window->tile_mode = META_TILE_NONE;
+      if (window->tile_mode != META_TILE_NONE)
+        {
+          window->tile_mode = META_TILE_NONE;
+          notify_tile_mode (window);
+        }
+
       wmonitor = window->monitor;
       n_logical_monitors =
         meta_monitor_manager_get_num_logical_monitors (monitor_manager);
@@ -6899,7 +6992,7 @@ end_grab_op (MetaWindow *window,
       if (meta_grab_op_is_moving (window->display->grab_op))
         {
           if (window->display->preview_tile_mode != META_TILE_NONE)
-            meta_window_tile (window, window->display->preview_tile_mode, FALSE);
+            meta_window_tile (window, window->display->preview_tile_mode);
           else
             update_move (window,
                          modifiers & CLUTTER_SHIFT_MASK,
@@ -7817,9 +7910,10 @@ meta_window_get_display (MetaWindow *window)
 }
 
 /**
- * meta_window_get_xwindow: (skip)
+ * meta_window_get_xwindow:
  * @window: a #MetaWindow
  *
+ * Returns: (type gulong): The Window (XID) of @window
  */
 Window
 meta_window_get_xwindow (MetaWindow *window)

@@ -1,6 +1,6 @@
 project('muffin', 'c',
-  version: '5.6.0',
-  meson_version: '>= 0.50.0',
+  version: '6.0.1',
+  meson_version: '>=0.56.0',
   license: 'GPLv2+'
 )
 
@@ -161,8 +161,7 @@ if have_gles2
   endif
 endif
 
-#have_wayland = get_option('wayland')
-have_wayland = false
+have_wayland = get_option('wayland')
 
 if have_wayland
   wayland_server_dep = dependency('wayland-server', version: wayland_server_req)
@@ -182,8 +181,7 @@ if have_libgudev
   gudev_dep = dependency('gudev-1.0', version: gudev_req)
 endif
 
-# have_native_backend = get_option('native_backend')
-have_native_backend = false
+have_native_backend = get_option('native_backend')
 
 if have_native_backend
   libdrm_dep = dependency('libdrm')
@@ -210,11 +208,9 @@ if have_native_backend
   endif
 endif
 
-#have_egl_device = get_option('egl_device')
-have_egl_device = false
+have_egl_device = get_option('egl_device')
 
-#have_wayland_eglstream = get_option('wayland_eglstream')
-have_wayland_eglstream = false
+have_wayland_eglstream = get_option('wayland_eglstream')
 
 if have_wayland_eglstream
   wayland_eglstream_protocols_dep = dependency('wayland-eglstream-protocols')
@@ -376,7 +372,7 @@ cdata.set('HAVE_STARTUP_NOTIFICATION', have_startup_notification)
 cdata.set('HAVE_INTROSPECTION', have_introspection)
 cdata.set('HAVE_PROFILER', have_profiler)
 
-xkb_base = xkeyboard_config_dep.get_pkgconfig_variable('xkb_base')
+xkb_base = xkeyboard_config_dep.get_variable(pkgconfig: 'xkb_base')
 cdata.set_quoted('XKB_BASE', xkb_base)
 
 if cc.has_header_symbol('sys/prctl.h', 'prctl')
@@ -385,9 +381,15 @@ endif
 
 have_xwayland_initfd = false
 if have_wayland
+  xwayland_dep = dependency('xwayland', required: false)
+
   xwayland_path = get_option('xwayland_path')
   if xwayland_path == ''
-    xwayland_path = find_program('Xwayland').path()
+    if xwayland_dep.found()
+      xwayland_path = xwayland_dep.get_pkgconfig_variable('xwayland')
+    else
+      xwayland_path = find_program('Xwayland').full_path()
+    endif
   endif
   cdata.set_quoted('XWAYLAND_PATH', xwayland_path)
 
@@ -402,9 +404,15 @@ if have_wayland
 
   # For Xwayland -initfd usage
   use_initfd = get_option('xwayland_initfd')
-  if use_initfd.auto()
+  if xwayland_dep.found()
+    xwayland_supports_initfd = xwayland_dep.get_pkgconfig_variable('have_initfd') == 'true'
+  else
     xwayland_options = run_command(xwayland_path, '-help')
-    have_xwayland_initfd = xwayland_options.stderr().contains('-initfd')
+    xwayland_supports_initfd = xwayland_options.stderr().contains('-initfd')
+  endif
+
+  if use_initfd.auto()
+    have_xwayland_initfd = xwayland_supports_initfd
   else
     have_xwayland_initfd = use_initfd.enabled()
   endif
@@ -483,7 +491,7 @@ output = [
   '        Clutter tests............ ' + have_clutter_tests.to_string(),
   '        Installed tests.......... ' + have_installed_tests.to_string(),
   '',
-  '  Now type \'ninja -C ' + meson.build_root() + '\' to build ' + meson.project_name(),
+  '  Now type \'ninja -C ' + meson.project_build_root() + '\' to build ' + meson.project_name(),
   '',
   '',
 ]

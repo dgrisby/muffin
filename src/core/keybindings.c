@@ -3650,13 +3650,8 @@ can_tile (MetaWindow  *window,
 }
 
 static void
-handle_tile_action (MetaDisplay     *display,
-                    MetaWindow      *window,
-                    ClutterKeyEvent *event,
-                    MetaKeyBinding  *binding,
-                    gpointer         dummy)
+do_tile_move (MetaWindow *window, MetaTileMode mode)
 {
-  MetaTileMode mode = binding->handler->data;
   MetaTileMode new_mode;
 
   new_mode = get_new_tile_mode (mode, META_WINDOW_MAXIMIZED (window) ? META_TILE_MAXIMIZED : window->tile_mode);
@@ -3672,9 +3667,68 @@ handle_tile_action (MetaDisplay     *display,
     {
       window->tile_monitor_number = window->monitor->number;
       window->tile_mode = META_TILE_NONE;
-      meta_window_tile (window, new_mode, FALSE);
+      meta_window_tile (window, new_mode);
     }
 }
+
+static void
+handle_tile_action (MetaDisplay     *display,
+                    MetaWindow      *window,
+                    ClutterKeyEvent *event,
+                    MetaKeyBinding  *binding,
+                    gpointer         dummy)
+{
+  MetaTileMode mode = binding->handler->data;
+  do_tile_move (window, mode);
+}
+
+/**
+ * meta_display_push_tile:
+ * @display: the #MetaDisplay
+ * @window: the #MetaWindow to act upon
+ * @direction: the #MetaMotionDirection to push the window in.
+ *
+ * If the window is not yet tiled, tile the window to the portion
+ * of the monitor indicated by @direction. If already tiled, perform
+ * navigation around the possible tile positions, or untile the
+ * window, according to @direction.
+ *
+ * For example, if @window is left-tiled, and the @direction is
+ * #META_MOTION_UP, the window will be upper-left corner tiled. If the
+ * @direction is #META_MOTION_RIGHT, the window will be untiled.
+ *
+ * This logic is identical to the behavior of the tiling keyboard
+ * shortcuts.
+ **/
+void
+meta_display_push_tile (MetaDisplay         *display,
+                        MetaWindow          *window,
+                        MetaMotionDirection  direction)
+{
+  g_return_if_fail (META_IS_DISPLAY (display) && META_IS_WINDOW (window));
+
+  MetaTileMode mode;
+  switch (direction)
+    {
+      case META_MOTION_LEFT:
+        mode = META_TILE_LEFT;
+        break;
+      case META_MOTION_RIGHT:
+        mode = META_TILE_RIGHT;
+        break;
+      case META_MOTION_UP:
+        mode = META_TILE_TOP;
+        break;
+      case META_MOTION_DOWN:
+        mode = META_TILE_BOTTOM;
+        break;
+      default:
+        return;
+    }
+
+    do_tile_move (window, mode);
+}
+
 
 static void
 handle_toggle_maximized    (MetaDisplay     *display,
@@ -4016,6 +4070,25 @@ handle_rotate_monitor (MetaDisplay    *display,
     meta_backend_get_monitor_manager (backend);
 
   meta_monitor_manager_rotate_monitor (monitor_manager);
+}
+
+static void
+handle_opacity (MetaDisplay    *display,
+                MetaWindow     *window,
+                ClutterKeyEvent *event,
+                MetaKeyBinding *binding,
+                gpointer        dummy)
+{
+    MetaKeyBindingAction action = meta_prefs_get_keybinding_action (binding->name);
+
+    if (action == META_KEYBINDING_ACTION_DECREASE_OPACITY)
+      {
+        meta_window_decrease_opacity (window);
+      }
+    else
+      {
+        meta_window_increase_opacity (window);
+      }
 }
 
 static void
@@ -4870,6 +4943,20 @@ init_builtin_key_bindings (MetaDisplay *display)
                           META_KEY_BINDING_IGNORE_AUTOREPEAT,
                           META_KEYBINDING_ACTION_MOVE_TO_CENTER,
                           handle_move_to_center, 0);
+
+  add_builtin_keybinding (display,
+                          "increase-opacity",
+                          common_keybindings,
+                          META_KEY_BINDING_PER_WINDOW,
+                          META_KEYBINDING_ACTION_INCREASE_OPACITY,
+                          handle_opacity, 0);
+
+  add_builtin_keybinding (display,
+                          "decrease-opacity",
+                          common_keybindings,
+                          META_KEY_BINDING_PER_WINDOW,
+                          META_KEYBINDING_ACTION_DECREASE_OPACITY,
+                          handle_opacity, 0);
 
   g_object_unref (common_keybindings);
   g_object_unref (mutter_keybindings);
